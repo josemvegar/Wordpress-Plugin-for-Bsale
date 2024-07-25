@@ -153,9 +153,11 @@ function RunOnDeactivate() {
     wp_clear_scheduled_hook('CronActualizarStockBsale');
     wp_clear_scheduled_hook('CronActualizarPriceBsale');
 }
+
 register_deactivation_hook( __FILE__, 'RunOnDeactivate' );*/
 
-function CrontIntervalBsale($schedules) {
+//PENDIENTE CON ESTO DE ABAJO QUE LO DESACTIVE PARA PROBAR -----------------------------
+/*function CrontIntervalBsale($schedules) {
     $schedules['every60minute'] = array(
             'interval'  => 3600, // tiempo en segundos
             'display'   => 'Cada 60 minutos'
@@ -172,7 +174,7 @@ function RunOnActivate(){
         wp_schedule_event(time(), 'every60minute', 'ActualizarStockBsale', array($nonce));
     }
 }
-register_activation_hook(__FILE__, 'RunOnActivate');
+register_activation_hook(__FILE__, 'RunOnActivate');*/
 
 function RunOnDeactivate() {
     wp_clear_scheduled_hook('ActualizarPrecioIvaBsale');
@@ -209,7 +211,7 @@ function GetIDProductBySku($Sku){
 
 
 /*Actualizar JSON*/
-function ActualizarJsonBsaleCreate($nonce){
+/*function ActualizarJsonBsaleCreate($nonce){
     $nonce = sanitize_text_field( $_POST['nonce'] );
 
     if (!wp_verify_nonce($nonce, 'seg')) {
@@ -223,31 +225,56 @@ function ActualizarJsonBsaleCreate($nonce){
     }
 
     $productsBsale   = json_decode(getProductsBsale());
-    //var_dump($productsBsale);
     
     $wooArray           = [];
-
-/*foreach ($productsBsale as $ValueproductsBsale) {
-
-   
-         var_dump($ValueproductsBsale->variants[0]->code);
-
-}*/
-
-
- //var_dump($wooArray);
 
     $bonito= json_encode($productsBsale, JSON_PRETTY_PRINT);
     $jsondatabsaleproduct = '{"data":'.$bonito.'}';
     file_put_contents(MY_PLUGIN_PATH_BSALE.'/admin/dataBsaleCreate/DataBsale.json', $jsondatabsaleproduct);
 
-/*
-    $jsonintcomex = json_encode(array('data' => $wooArray));
-    file_put_contents(MY_PLUGIN_PATH.'/admin/dataIntcomex/dataIntComex.json', $jsonintcomex);
-*/
+
+}*/
 
 
+function ActualizarJsonBsaleCreate() {
+    $nonce = sanitize_text_field($_POST['nonce']);
+    if (!wp_verify_nonce($nonce, 'seg')) {
+        die("Ajaaaa, estas de noob!");
+    }
+
+    $page = isset($_POST['page']) ? intval($_POST['page']) : 0;
+    $productsBsale = get_transient('products_bsale') ?: [];
+
+    try {
+        $Cla = new CurlRequestBsale();
+        $newProducts = json_decode($Cla->getProducts($page), true);
+        $productsBsale = array_merge($productsBsale, $newProducts);
+
+        // Guardar productos combinados en un transitorio
+        set_transient('products_bsale', $productsBsale, 3600); // Guardar por 1 hora
+
+        // Verificar si hay más páginas
+        $hasMorePages = count($newProducts) > 0;
+        if (!$hasMorePages) {
+            $bonito = json_encode($productsBsale, JSON_PRETTY_PRINT);
+            $jsondatabsaleproduct = '{"data":' . $bonito . '}';
+            file_put_contents(MY_PLUGIN_PATH_BSALE . '/admin/dataBsaleCreate/DataBsale.json', $jsondatabsaleproduct);
+
+            // Eliminar el transitorio después de guardar
+            delete_transient('products_bsale');
+            //$hasMorePages= false;
+        }
+
+        wp_send_json_success(['hasMorePages' => $hasMorePages]);
+
+    } catch (Exception $e) {
+        wp_send_json_error(['message' => $e->getMessage()]);
+    }
 }
+
+
+
+
 
 
 // JOSE VEGA
@@ -264,15 +291,13 @@ function mi_registrar_hooks() {
 
 
 /*Actualizar STOCK*/
-function ActualizarStockBsale($nonce){
+/*function ActualizarStockBsale($nonce){
 //Casa Matriz
     $nonce = sanitize_text_field( $_POST['nonce'] );
 
     if (!wp_verify_nonce($nonce, 'seg')) {
         die ("Ajaaaa, estas de noob!");
     }
-
-    $Cla = new CurlRequestBsale;
 
     function getProductsStocksBsale(){
         $Cla = new CurlRequestBsale();
@@ -319,7 +344,56 @@ function ActualizarStockBsale($nonce){
 
 
 
+}*/
+
+
+function ActualizarStockBsale() {
+    $nonce = sanitize_text_field($_POST['nonce']);
+    if (!wp_verify_nonce($nonce, 'seg')) {
+        die("Ajaaaa, estas de noob!");
+    }
+
+    $page = isset($_POST['page']) ? intval($_POST['page']) : 0;
+    //$productsStockBsale = get_transient('products_stock_bsale') ?: [];
+
+    try {
+        $Cla = new CurlRequestBsale();
+        $newStocks = json_decode($Cla->getProductsStocks($page), true);
+        //$productsStockBsale = array_merge($productsStockBsale, $newStocks);
+
+        //set_transient('products_stock_bsale', $productsStockBsale, 3600); // Guardar por 1 hora
+
+        $hasMorePages = count($newStocks) > 0;
+        //if (!$hasMorePages) {
+        //foreach ($productsStockBsale as $stocks) {
+            foreach ($newStocks as $stocks) {
+                $sku = $stocks["sku"];
+                $stock = ($stocks["stock"] == 0 || $stocks["stock"] == null) ? 0 : $stocks["stock"];
+                $product_id = GetSkuByIDBsale($sku);
+
+                if ($product_id != null) {
+                    $stockActual = $stock == 0 ? 'outofstock' : 'instock';
+                    update_post_meta($product_id, '_stock', $stock);
+                    update_post_meta($product_id, '_stock_status', wc_clean($stockActual));
+                    wp_set_post_terms($product_id, array($stockActual), 'product_visibility', true);
+                    wc_delete_product_transients($product_id);
+                }
+            }
+
+            //delete_transient('products_stock_bsale');
+        //}
+
+        wp_send_json_success(['hasMorePages' => $hasMorePages]);
+
+    } catch (Exception $e) {
+        wp_send_json_error(['message' => $e->getMessage()]);
+    }
 }
+
+//add_action('wp_ajax_' . ActualizarStockBsaleCommerce.action, 'ActualizarStockBsale');
+
+
+
 add_action( 'wp_ajax_updatebsale', 'ActualizarStockBsale' );
 
 function GetSkuByIDBsale($sku) {

@@ -117,7 +117,7 @@ class CurlRequestBsale {
         die();
     }
 
-    public function getProducts() {
+    /*public function getProducts() {
         $products = [];
         $url = 'https://api.bsale.cl/v1/products.json?limit=50&expand[variants]';
     
@@ -147,7 +147,116 @@ class CurlRequestBsale {
             ];
         }
         return $variantDetails;
+    }*/
+
+    /*public function getProducts($page = 0, $retry = 3) {
+        $products = [];
+        $url = 'https://api.bsale.cl/v1/products.json?limit=50&offset=' . $page . '&expand[variants]';
+        
+        try {
+            $response = $this->client->request('GET', $url, ['headers' => $this->headers]);
+            $data = json_decode($response->getBody(), true);
+            $products = $data['items'];
+    
+            if (isset($data['next'])) {
+                // Si hay una próxima página, combinar los resultados y continuar
+                $products = array_merge($products, $this->getProducts($page + 50));
+                //return $products;
+            }
+
+            if ($page==0){
+                return $this->getVariantDetails($products);
+            }else{
+                return $products;
+            }
+            
+        } catch (Exception $e) {
+            if ($retry > 0) {
+                // Si ocurre un error (por ejemplo, timeout), reintentar la solicitud
+                sleep(2); // Esperar 2 segundos antes de reintentar
+                return $this->getProducts($page, $retry - 1);
+            } else {
+                throw $e; // Si se agotaron los reintentos, lanzar la excepción
+            }
+        }
     }
+
+    private function getVariantDetails($products) {
+        $variantDetails = [];
+        foreach ($products as $product) {
+            try {
+                $response = $this->client->request('GET', "https://api.bsale.cl/v1/variants/{$product["variants"]["items"][0]["id"]}/costs.json", ['headers' => $this->headers]);
+                $data = json_decode($response->getBody(), true);
+    
+                $variantDetails[] = [
+                    "id" => $product['id'],
+                    "name" => $product['name'],
+                    "variantId" => $product["variants"]["items"][0]["id"],
+                    "sku" => $product["variants"]["items"][0]["code"],
+                    "stock" => $data["history"][0]["availableFifo"],
+                    "price" => $data["history"][0]["cost"],
+                    "priceIva" => round($data["history"][0]["cost"] + (($data["history"][0]["cost"] * $this->tax)/100))
+                ];
+            } catch (Exception $e) {
+                // Manejar excepción, por ejemplo, loguear error y continuar
+                error_log("Error al obtener detalles de variante para el producto ID: " . $product['id']);
+            }
+        }
+        return $variantDetails;
+    }*/
+
+
+    public function getProducts($page = 0, $retry = 3) {
+        $products = [];
+        $url = 'https://api.bsale.cl/v1/products.json?limit=50&offset=' . ($page * 50) . '&expand[variants]';
+    
+        try {
+            $response = $this->client->request('GET', $url, ['headers' => $this->headers]);
+            $data = json_decode($response->getBody(), true);
+            $products = $data['items'];
+    
+            // Obtener detalles de variantes si es la primera página
+            //if ($page == 0) {
+                $products = $this->getVariantDetails($products);
+            //}
+    
+            return json_encode($products);
+    
+        } catch (Exception $e) {
+            if ($retry > 0) {
+                // Si ocurre un error (por ejemplo, timeout), reintentar la solicitud
+                sleep(2); // Esperar 2 segundos antes de reintentar
+                return $this->getProducts($page, $retry - 1);
+            } else {
+                throw $e; // Si se agotaron los reintentos, lanzar la excepción
+            }
+        }
+    }    
+
+    private function getVariantDetails($products) {
+        $variantDetails = [];
+        foreach ($products as $product) {
+            try {
+                $response = $this->client->request('GET', "https://api.bsale.cl/v1/variants/{$product["variants"]["items"][0]["id"]}/costs.json", ['headers' => $this->headers]);
+                $data = json_decode($response->getBody(), true);
+
+                $variantDetails[] = [
+                    "id" => $product['id'],
+                    "name" => $product['name'],
+                    "variantId" => $product["variants"]["items"][0]["id"],
+                    "sku" => $product["variants"]["items"][0]["code"],
+                    "stock" => $data["history"][0]["availableFifo"],
+                    "price" => $data["history"][0]["cost"],
+                    "priceIva" => round($data["history"][0]["cost"] + (($data["history"][0]["cost"] * $this->tax)/100))
+                ];
+            } catch (Exception $e) {
+                // Manejar excepción, por ejemplo, loguear error y continuar
+                error_log("Error al obtener detalles de variante para el producto ID: " . $product['id']);
+            }
+        }
+        return $variantDetails;
+    }
+
 
     /*public function getProducts() {
         $products = [];
@@ -193,7 +302,7 @@ class CurlRequestBsale {
         return $variantDetails;
     }*/
 
-    public function getProductsStocks() {
+    /*public function getProductsStocks() {
         $stocks = [];
         $url = 'https://api.bsale.cl/v1/stocks.json?limit=50&expand[variant]';
     
@@ -209,7 +318,38 @@ class CurlRequestBsale {
             $url = isset($data['next']) ? $data['next'] . '&expand[variant]' : null;
         } while ($url);
         return $stocks;
+    }*/
+
+
+    public function getProductsStocks($page = 0, $retry = 3) {
+        $stocks = [];
+        $url = 'https://api.bsale.cl/v1/stocks.json?limit=50&offset=' . ($page * 50) . '&expand[variant]';
+    
+        try {
+            $response = $this->client->request('GET', $url, ['headers' => $this->headers]);
+            $data = json_decode($response->getBody(), true);
+            if(count($data["items"]) > 0){
+                foreach ($data["items"] as $stock) {
+                        $stocks[] = [
+                            "sku" => $stock["variant"]["code"],
+                            "stock" => $stock["quantityAvailable"]
+                        ];
+                }
+            }
+    
+            return json_encode($stocks);
+    
+        } catch (Exception $e) {
+            if ($retry > 0) {
+                sleep(2);
+                return $this->getProductsStocks($page, $retry - 1);
+            } else {
+                throw $e;
+            }
+        }
     }
+    
+
 
     public function getPriceLists() {
         $prices = [];

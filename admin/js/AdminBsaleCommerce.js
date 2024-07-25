@@ -20,7 +20,7 @@ jQuery(document).ready( function () {
       }
   });
  
-  jQuery("#ActualizarJson").click(function (e) {
+  /*jQuery("#ActualizarJson").click(function (e) {
     e.preventDefault();
 
     jQuery("#ActualizarJson").html('<i class="fa fa-spinner fa-spin" style="font-size:20px"></i>').addClass('disabled');
@@ -51,7 +51,61 @@ jQuery(document).ready( function () {
         location.reload();
       }
     });
-  });
+  });*/
+
+
+  jQuery("#ActualizarJson").click(function (e) {
+    e.preventDefault();
+
+    jQuery("#ActualizarJson").html('<i class="fa fa-spinner fa-spin" style="font-size:20px"></i>').addClass('disabled');
+
+    function loadProducts(page = 0) {
+        jQuery.ajax({
+            type: "POST",
+            url: ActualizarJson.url,
+            data: {
+                action: ActualizarJson.action,
+                nonce: ActualizarJson.nonce,
+                page: page
+            },
+            beforeSend: function() {
+                jQuery(".loaderBsaleCommerce").show();
+                jQuery('.popup-overlay').fadeIn('slow');
+            },
+            success: function(data) {
+                if (data.success) {
+                    if (data.data.hasMorePages) {
+                        sessionStorage.setItem('currentPage', page + 1);
+                        loadProducts(page + 1);
+                    } else {
+                        sessionStorage.removeItem('currentPage');
+                        jQuery("#ActualizarJson .fa-spin").remove();
+                        jQuery("#ActualizarJson").html('Actualizar lista de productos');
+                        jQuery("#ActualizarJson").removeClass('disabled');
+                        alert('Actualización completada');
+                        jQuery(".loaderBsaleCommerce").hide();
+                        jQuery('.popup-overlay').fadeOut('slow');
+                        location.reload();
+                    }
+                } else {
+                    console.log(data.data.message);
+                    alert('Error: ' + data.data.message);
+                    sessionStorage.removeItem('currentPage');
+                }
+            },
+            error: function() {
+                // Intentar de nuevo desde la página actual
+                var retryPage = parseInt(sessionStorage.getItem('currentPage')) || page;
+                loadProducts(retryPage);
+            }
+        });
+    }
+
+    // Iniciar desde la página guardada o desde la página 0
+    var currentPage = parseInt(sessionStorage.getItem('currentPage')) || 0;
+    loadProducts(currentPage);
+});
+
 
 
   /*table = jQuery('#myTablebsale').DataTable( {
@@ -94,7 +148,7 @@ jQuery(document).ready( function () {
   //console.log("rgetrhget");
 
 
-  jQuery("#UpdateStockBsaleCommerce").click(function (e) {
+  /*jQuery("#UpdateStockBsaleCommerce").click(function (e) {
     e.preventDefault();
 
     jQuery("#UpdateStockBsaleCommerce").html('<i class="fa fa-spinner fa-spin" style="font-size:20px"></i>').addClass('disabled');
@@ -119,13 +173,63 @@ jQuery(document).ready( function () {
         alert('Actualización completada');
         jQuery(".loaderBsaleCommerce").hide();
         jQuery('.popup-overlay').fadeOut('slow');
-        //location.reload();
-        //console.log(data);
+        location.reload();
 
         
       }
     });
-  });
+  });*/
+
+
+  jQuery("#UpdateStockBsaleCommerce").click(function (e) {
+    e.preventDefault();
+
+    jQuery("#UpdateStockBsaleCommerce").html('<i class="fa fa-spinner fa-spin" style="font-size:20px"></i>').addClass('disabled');
+
+    function loadStock(page = 0) {
+        jQuery.ajax({
+            type: "POST",
+            url: ActualizarStockBsaleCommerce.url,
+            data: {
+                action: ActualizarStockBsaleCommerce.action,
+                nonce: ActualizarStockBsaleCommerce.nonce,
+                page: page
+            },
+            beforeSend: function() {
+                jQuery(".loaderBsaleCommerce").show();
+                jQuery('.popup-overlay').fadeIn('slow');
+            },
+            success: function(data) {
+                if (data.success) {
+                    if (data.data.hasMorePages) {
+                        sessionStorage.setItem('currentStockPage', page + 1);
+                        loadStock(page + 1);
+                    } else {
+                        sessionStorage.removeItem('currentStockPage');
+                        jQuery("#UpdateStockBsaleCommerce .fa-spin").remove();
+                        jQuery("#UpdateStockBsaleCommerce").html('Actualizar lista de productos');
+                        jQuery("#UpdateStockBsaleCommerce").removeClass('disabled');
+                        alert('Actualización completada');
+                        jQuery(".loaderBsaleCommerce").hide();
+                        jQuery('.popup-overlay').fadeOut('slow');
+                        location.reload();
+                    }
+                } else {
+                    console.log(data.data.message);
+                    alert('Error: ' + data.data.message);
+                    sessionStorage.removeItem('currentStockPage');
+                }
+            },
+            error: function() {
+                var retryPage = parseInt(sessionStorage.getItem('currentStockPage')) || page;
+                loadStock(retryPage);
+            }
+        });
+    }
+
+    var currentPage = parseInt(sessionStorage.getItem('currentStockPage')) || 0;
+    loadStock(currentPage);
+});
 
 
 
