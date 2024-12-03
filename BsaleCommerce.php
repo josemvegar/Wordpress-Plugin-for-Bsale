@@ -347,14 +347,15 @@ function mi_registrar_hooks() {
 }*/
 
 
-function ActualizarStockBsale() {
+function ActualizarStockBsale($page = 0, $is_cron = false) {
     $nonce = sanitize_text_field($_POST['nonce']);
-    if (!wp_verify_nonce($nonce, 'seg')) {
+    if (!wp_verify_nonce($nonce, 'seg') && $is_cron==false) {
         die("Ajaaaa, estas de noob!");
     }
-
-    $page = isset($_POST['page']) ? intval($_POST['page']) : 0;
-    //$productsStockBsale = get_transient('products_stock_bsale') ?: [];
+    if ($is_cron==false){
+        $page = isset($_POST['page']) ? intval($_POST['page']) : 0;
+        //$productsStockBsale = get_transient('products_stock_bsale') ?: [];   
+    }
 
     try {
         $Cla = new CurlRequestBsale();
@@ -372,6 +373,9 @@ function ActualizarStockBsale() {
                 $product_id = GetSkuByIDBsale($sku);
 
                 if ($product_id != null) {
+                    // Activar la gestión de inventario
+                    update_post_meta($product_id, '_manage_stock', 'yes');
+                    
                     $stockActual = $stock == 0 ? 'outofstock' : 'instock';
                     update_post_meta($product_id, '_stock', $stock);
                     update_post_meta($product_id, '_stock_status', wc_clean($stockActual));
@@ -382,8 +386,16 @@ function ActualizarStockBsale() {
 
             //delete_transient('products_stock_bsale');
         //}
+        
+        // Si hay más páginas y se está ejecutando desde WP-Cron, programar una nueva ejecución
+        if ($hasMorePages && $is_cron) {
+            wp_schedule_single_event(time() + 20, 'actualizar_stock_bsale_event', [$page + 1, true]);
+        }
+        
+        if($is_cron==false){
+            wp_send_json_success(['hasMorePages' => $hasMorePages]);            
+        }
 
-        wp_send_json_success(['hasMorePages' => $hasMorePages]);
 
     } catch (Exception $e) {
         wp_send_json_error(['message' => $e->getMessage()]);
@@ -395,6 +407,48 @@ function ActualizarStockBsale() {
 
 
 add_action( 'wp_ajax_updatebsale', 'ActualizarStockBsale' );
+
+
+/*CRON JV*/
+
+// Hook para el evento de WP-Cron, ejecuta la función de actualización
+add_action('actualizar_stock_bsale_event', 'ActualizarStockBsale', 10, 2);
+
+// Función para registrar la tarea de WP-Cron que se ejecuta cada hora
+/*function registrar_actualizacion_stock_bsale_cron() {
+    if (!wp_next_scheduled('actualizar_stock_bsale_event')) {
+        //wp_schedule_event(time(), 'hourly', 'actualizar_stock_bsale_event', [0, true]);
+    }
+}
+//add_action('wp', 'registrar_actualizacion_stock_bsale_cron');
+add_action('init', 'registrar_actualizacion_stock_bsale_cron');
+*/
+
+/**
+ * Registrar el evento WP-Cron en la activación del plugin
+ */
+function registrar_actualizacion_stock_bsale_cron() {
+    if ( ! wp_next_scheduled( 'actualizar_stock_bsale_event' ) ) {
+        wp_schedule_event( time(), 'hourly', 'actualizar_stock_bsale_event', [0, true] );
+        error_log('Evento programado.');
+    }
+}
+register_activation_hook( __FILE__, 'registrar_actualizacion_stock_bsale_cron' );
+
+/**
+ * Eliminar el evento WP-Cron en la desactivación del plugin
+ */
+function desactivar_actualizacion_stock_bsale_cron() {
+    $timestamp = wp_next_scheduled( 'actualizar_stock_bsale_event' );
+    if ( $timestamp ) {
+        wp_unschedule_event( $timestamp, 'actualizar_stock_bsale_event' );
+        error_log('Evento desprogramado.');
+    }
+}
+register_deactivation_hook( __FILE__, 'desactivar_actualizacion_stock_bsale_cron' );
+
+/*----------------------------------------------------------------------------*/
+
 
 function GetSkuByIDBsale($sku) {
     global $wpdb;
@@ -581,139 +635,6 @@ function ActualizarPrecioIvaBsale($nonce){
 
 add_action( 'wp_ajax_updateprecioivabsale', 'ActualizarPrecioIvaBsale' );
 
-
-
-
-
-/*Generar Factura*/
-function PutOrderBsaleCreate($order_id){
-
-$order = wc_get_order( $order_id );
-$id_order = $order->get_order_number();
-$statusOrden = $order->get_status();
-$orderdate = strtotime($order->get_date_created());
-$correoBoleta = $order->get_billing_email();
-$productoOrdenArray = [];
-
-    foreach ( $order->get_items() as $item_id => $item ) {
-
-        $product = $item->get_product();
-        $quantity = $item->get_quantity();
-        $item_sku = $product->get_sku();
-        $precioConIVA = $item->get_total();
-        $precioSinIVA =  $precioConIVA - ($precioConIVA * 0.19);
-        $product_name = $item->get_name();
-        $precioProductoSinIVA = $product->get_price() / 1.19;
-
-
-        $productoOrdenArray[] = [
-            'netUnitValue' => $precioProductoSinIVA,
-            'quantity' => $quantity,
-            'comment' => $product_name,
-            'taxes' => array( array(
-
-                 'code' => 14,
-                 'percentage' =>  19
-
-            )),
-        ];
-
-        
-    }
-        error_log(print_r($productoOrdenArray,true));
-
-
-    $postdata = '
-        {
-          "codeSii": 39,
-          "officeId": "4",
-          "priceListId": 3,
-          "emissionDate": '.$orderdate.',
-          "details": '.json_encode($productoOrdenArray).'
-        } 
-    ';
-
-        $Cla = new CurlRequestBsale();
-        $responseBoleta3 = $Cla->generarBoleta($postdata);
-
-
-       $responseBoleta2 = '{"href":"https://api.bsale.cl/v1/documents/57426.json","id":57426,"emissionDate":1670976000,"expirationDate":1670976000,"generationDate":1670998346,"number":55367,"serialNumber":null,"trackingNumber":null,"totalAmount":473780.0,"netAmount":398134.0,"taxAmount":75646.0,"exemptAmount":0.0,"exportTotalAmount":0.0,"exportNetAmount":0.0,"exportTaxAmount":0.0,"exportExemptAmount":0.0,"commissionRate":0.0,"commissionNetAmount":0.0,"commissionTaxAmount":0.0,"commissionTotalAmount":0.0,"percentageTaxWithheld":0.0,"purchaseTaxAmount":0.0,"purchaseTotalAmount":0.0,"address":"","municipality":"","city":"","urlTimbre":null,"urlPublicView":"https://app2.bsale.cl/view/27264/c24f1c2ea561?sfd=99","urlPdf":"https://app2.bsale.cl/view/27264/c24f1c2ea561.pdf?sfd=99","urlPublicViewOriginal":"https://app2.bsale.cl/view/27264/c24f1c2ea561","urlPdfOriginal":"https://app2.bsale.cl/view/27264/c24f1c2ea561.pdf","token":"c24f1c2ea561","state":0,"commercialState":0,"urlXml":"https://api.bsale.cl/v1/27264/files/c24f1c2ea561.xml","ted":null,"salesId":null,"informedSii":2,"responseMsgSii":null,"document_type":{"href":"https://api.bsale.cl/v1/document_types/1.json","id":"1"},"office":{"href":"https://api.bsale.cl/v1/offices/4.json","id":"4"},"user":{"href":"https://api.bsale.cl/v1/users/4.json","id":"4"},"coin":{"href":"https://api.bsale.cl/v1/coins/1.json","id":"1"},"references":{"href":"https://api.bsale.cl/v1/documents/57426/references.json"},"document_taxes":{"href":"https://api.bsale.cl/v1/documents/57426/document_taxes.json"},"details":{"href":"https://api.bsale.cl/v1/documents/57426/details.json"},"sellers":{"href":"https://api.bsale.cl/v1/documents/57426/sellers.json"},"attributes":{"href":"https://api.bsale.cl/v1/documents/57426/attributes.json"}}';
-
-
-        $boleta = json_decode($responseBoleta3);
-
-
-        $notas1 = 'Su boleta ha sido generado con satisfactoriamente, puede descargarla desde aqui '.print_r($boleta->urlPdf, TRUE);
-        $order->add_order_note($notas1);
-
-        error_log(print_r($boleta->urlPdf,true));
-
-        $headers = 'From: Equipo de Soporte <contacto@josecortesia.cl>' . "\r\n";
-        wp_mail($correoBoleta, 'ENVIO DE BOLETA SIMPLE BSALE', $notas1, $headers );
-
-
-
-
-/*
-
-
-
-{
-  "codeSii": 39,
-  "officeId": "4",
-  "priceListId": 4,
-  "emissionDate": 1670682205,
-  "details": [
-    {
-      "netUnitValue": 10916,
-      "quantity": 1,
-      "comment": "ACEITE DE OLIVA CORATINA",
-      "taxes": [
-        {
-          "code": 14,
-          "percentage": 19
-        }
-      ]
-    },
-    {
-      "netUnitValue": 10916,
-      "quantity": 1,
-      "comment": "Galletas Saca Pita Romero 200 Grs",
-      "taxes": [
-        {
-          "code": 14,
-          "percentage": 19
-        }
-      ]
-    }
-  ]
-} 
-
-
-
-*/
-
-
-
-}
-
-/*Probar Orden*/
-/*
-woocommerce_order_status_pending
-woocommerce_order_status_failed
-woocommerce_order_status_on-hold
-woocommerce_order_status_processing
-woocommerce_order_status_completed
-woocommerce_order_status_refunded
-woocommerce_order_status_cancelled
-*/
-//add_action( 'woocommerce_payment_complete_order_status_processing', 'PutOrderBsale' );
-//add_action( 'woocommerce_payment_complete_order_status_completed', 'PutOrderBsale' );
-//add_action( 'woocommerce_checkout_order_processed', 'PutOrderBsale', 10, 3 );
-//add_action('woocommerce_order_status_changed','PutOrderBsale');
-add_action('woocommerce_order_status_completed','PutOrderBsaleCreate', 10, 1);
-
-
 function AjaxEndPointBsale(){
         echo file_get_contents(MY_PLUGIN_PATH_BSALE.'admin/dataBsaleCreate/DataBsale.json');
         wp_die();
@@ -721,3 +642,210 @@ function AjaxEndPointBsale(){
 }
 add_action('wp_ajax_datatables_endpoint', 'AjaxEndPointBsale'); //logged in
 add_action('wp_ajax_no_priv_datatables_endpoint', 'AjaxEndPointBsale'); //not logged in
+
+// Función para obtener el ID de la variante en Bsale utilizando el SKU
+function obtenerIdVariantePorSKU($sku, $token) {
+    $url = "https://api.bsale.io/v1/variants.json?code=" . urlencode($sku);
+    $headers = array(
+        "access_token: $token",
+        "Content-Type: application/json"
+    );
+
+    $curl = curl_init();
+    curl_setopt_array($curl, array(
+        CURLOPT_URL => $url,
+        CURLOPT_RETURNTRANSFER => TRUE,
+        CURLOPT_HTTPHEADER => $headers,
+    ));
+
+    $response = curl_exec($curl);
+    curl_close($curl);
+
+    $data = json_decode($response, true);
+    if (isset($data['items'][0]['id'])) {
+        return $data['items'][0]['id'];
+    } else {
+        return null;
+    }
+}
+
+// Función para descontar stock en Bsale
+function descontarStockBsale($order) {
+    $productosConsumo = [];
+    $token = "1e8466ceb957ded197876fe675c1bec1f16d79e4"; // Reemplaza con tu token de acceso
+    $officeId = 1;  // ID de la sucursal en Bsale
+
+    foreach ($order->get_items() as $item) {
+        $product = $item->get_product();
+        $quantity = $item->get_quantity();
+        $item_sku = $product->get_sku();
+
+        // Obtener el ID de la variante en Bsale utilizando el SKU
+        $variantId = obtenerIdVariantePorSKU($item_sku, $token);
+
+        if ($variantId) {
+            // Añadir detalles del consumo de stock
+            $productosConsumo[] = [
+                'quantity' => $quantity,
+                'variantId' => $variantId
+            ];
+        } else {
+            // Manejar el caso en que no se encuentra la variante
+            error_log("No se encontró la variante para el SKU: " . $item_sku);
+        }
+    }
+
+    if (!empty($productosConsumo)) {
+        $postdata = json_encode([
+            'officeId' => $officeId,
+            'note' => 'Descuento de stock por generación de boleta',
+            'details' => $productosConsumo
+        ]);
+
+        $headers = array(
+            "access_token: $token",
+            "Content-Type: application/json"
+        );
+
+        $curl = curl_init();
+        curl_setopt_array($curl, array(
+            CURLOPT_URL => "https://api.bsale.io/v1/stocks/consumptions.json",
+            CURLOPT_RETURNTRANSFER => TRUE,
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_POST  => true,
+            CURLOPT_POSTFIELDS  => $postdata,
+        ));
+
+        $responseConsumo = curl_exec($curl);
+        curl_close($curl);
+
+        // Registrar en el log
+        error_log(print_r($responseConsumo, true));
+    } else {
+        error_log("No se generó ningún consumo de stock debido a la falta de variantes válidas.");
+    }
+}
+function PutOrderBsaleCreate2($order_id) {
+    $order = wc_get_order($order_id);
+    $id_order = $order->get_order_number();
+    $statusOrden = $order->get_status();
+    //$orderdate = strtotime($order->get_date_created());
+    
+    $orderdate = strtotime($order->get_date_completed());
+
+    $correoBoleta = $order->get_billing_email();
+    $productoOrdenArray = [];
+    $totalAmount = 0;
+
+
+foreach ($order->get_items() as $item_id => $item) {
+    $product = $item->get_product();
+    $quantity = $item->get_quantity();
+    $item_sku = $product->get_sku();
+    $precioConIVA = $item->get_total(); // Este ya es el subtotal (precio por cantidad con IVA)
+    $precioSinIVA = $precioConIVA / 1.19; // Calcular precio sin IVA
+    $product_name = $item->get_name();
+    
+    // Añadir este subtotal al totalAmount
+    $totalAmount += $precioConIVA; // Aquí se acumula el subtotal de cada producto
+
+    // Añadir cada producto al arreglo de detalles
+    $productoOrdenArray[] = [
+        'netUnitValue' => round($precioSinIVA / $quantity, 2), // Calcular precio unitario sin IVA
+        'quantity' => $quantity,
+        'comment' => $product_name,
+        'taxes' => [
+            [
+                'code' => 14,
+                'percentage' => 19
+            ]
+        ]
+    ];
+}
+
+/*
+    foreach ($order->get_items() as $item_id => $item) {
+        $product = $item->get_product();
+        $quantity = $item->get_quantity();
+        $item_sku = $product->get_sku();
+        $precioConIVA = $item->get_total();
+        $precioSinIVA = $precioConIVA / 1.19; // Calcular precio sin IVA
+        $product_name = $item->get_name();
+        $totalAmount += $precioConIVA; // Sumar al total del pedido
+
+        $productoOrdenArray[] = [
+            'netUnitValue' => round($precioSinIVA, 2),
+            'quantity' => $quantity,
+            'comment' => $product_name,
+            'taxes' => [
+                [
+                    'code' => 14,
+                    'percentage' => 19
+                ]
+            ]
+        ];
+    }
+*/
+    // Construir el array de pagos
+    $paymentsArray = [
+        [
+            'paymentTypeId' => 8, // ID para "TRANSFERENCIA BANCARIA"
+            'amount' => round($totalAmount, 2)
+        ]
+    ];
+
+    // Construir el cuerpo de la solicitud
+    $postdata = json_encode([
+        'codeSii' => 39, // Código SII para boleta electrónica
+        'officeId' => 1, // ID de la oficina correspondiente
+        'priceListId' => 8, // ID de la lista de precios
+        'emissionDate' => $orderdate,
+        'details' => $productoOrdenArray,
+        'payments' => $paymentsArray
+    ]);
+
+    function generarBoleta($postdata) {
+        $token = "1e8466ceb957ded197876fe675c1bec1f16d79e4";
+        $headers = [
+            "access_token: $token",
+            "Content-Type: application/json"
+        ];
+
+        $curl = curl_init();
+        curl_setopt_array($curl, [
+            CURLOPT_URL => "https://api.bsale.cl/v1/documents.json",
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $postdata,
+        ]);
+        $responseBoleta = curl_exec($curl);
+        curl_close($curl);
+        return $responseBoleta;
+        
+    }
+
+    $responseBoleta3 = generarBoleta($postdata);
+    //$responseBoleta2 = '{"href":"https://api.bsale.cl/v1/documents/57426.json","id":57426,"emissionDate":1670976000,"expirationDate":1670976000,"generationDate":1670998346,"number":55367,"serialNumber":null,"trackingNumber":null,"totalAmount":473780.0,"netAmount":398134.0,"taxAmount":75646.0,"exemptAmount":0.0,"exportTotalAmount":0.0,"exportNetAmount":0.0,"exportTaxAmount":0.0,"exportExemptAmount":0.0,"commissionRate":0.0,"commissionNetAmount":0.0,"commissionTaxAmount":0.0,"commissionTotalAmount":0.0,"percentageTaxWithheld":0.0,"purchaseTaxAmount":0.0,"purchaseTotalAmount":0.0,"address":"","municipality":"","city":"","urlTimbre":null,"urlPublicView":"https://app2.bsale.cl/view/27264/c24f1c2ea561?sfd=99","urlPdf":"https://app2.bsale.cl/view/27264/c24f1c2ea561.pdf?sfd=99","urlPublicViewOriginal":"https://app2.bsale.cl/view/27264/c24f1c2ea561","urlPdfOriginal":"https://app2.bsale.cl/view/27264/c24f1c2ea561.pdf","token":"c24f1c2ea561","state":0,"commercialState":0,"urlXml":"https://api.bsale.cl/v1/27264/files/c24f1c2ea561.xml","ted":null,"salesId":null,"informedSii":2,"responseMsgSii":null,"document_type":{"href":"https://api.bsale.cl/v1/document_types/1.json","id":"1"},"office":{"href":"https://api.bsale.cl/v1/offices/4.json","id":"4"},"user":{"href":"https://api.bsale.cl/v1/users/4.json","id":"4"},"coin":{"href":"https://api.bsale.cl/v1/coins/1.json","id":"1"},"references":{"href":"https://api.bsale.cl/v1/documents/57426/references.json"},"document_taxes":{"href":"https://api.bsale.cl/v1/documents/57426/document_taxes.json"},"details":{"href":"https://api.bsale.cl/v1/documents/57426/details.json"},"sellers":{"href":"https://api.bsale.cl/v1/documents/57426/sellers.json"},"attributes":{"href":"https://api.bsale.cl/v1/documents/57426/attributes.json"}}';
+    $boleta = json_decode($responseBoleta3);
+    
+
+    if (isset($boleta->urlPdf)) {
+        
+       
+        
+        $notas1 = 'Su boleta ha sido generada satisfactoriamente. Puede descargarla desde aquí: ' . $boleta->urlPdf;
+        $order->add_order_note($notas1);
+        $headers = 'From: Equipo de Soporte <clubreposterovitacura@gmail.com>' . "\r\n";
+        wp_mail($correoBoleta, 'Envío de Boleta Bsale', $notas1, $headers);
+        descontarStockBsale($order);
+    } else {
+        $order->add_order_note('Error al generar la boleta en Bsale.');
+    }
+    
+
+    
+}
+add_action('woocommerce_order_status_completed', 'PutOrderBsaleCreate2', 10, 1);

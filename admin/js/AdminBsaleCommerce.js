@@ -133,7 +133,7 @@ jQuery(document).ready( function () {
     },
     "responsive": true,
     "ajax": {
-      "url": "/club/wp-admin/admin-ajax.php?action=datatables_endpoint",
+      "url": "/wp-admin/admin-ajax.php?action=datatables_endpoint",
       "dataSrc": "data"
     },
     "columns": [

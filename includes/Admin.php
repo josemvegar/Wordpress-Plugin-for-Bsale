@@ -44,9 +44,9 @@ function opciones_bsale() {
 
             <input type="submit" name="submit" id="UpdateStockBsaleCommerce" class="button button-primary" value="<?php  _e('Actualizar Stock en Woocommerce', 'BsaleCommerce')?>">
 
-            <input type="submit" name="submit" id="UpdatePrecioBsaleCommerce" class="button button-primary" value="<?php  _e('Actualizar Precio en Woocommerce', 'BsaleCommerce')?>">
+            <input type="submit" style="display:none;" name="submit" id="UpdatePrecioBsaleCommerce" class="button button-primary" value="<?php  _e('Actualizar Precio en Woocommerce', 'BsaleCommerce')?>">
 
-            <input type="submit" name="submit" id="UpdatePrecioIvaBsaleCommerce" class="button button-primary" value="<?php  _e('Actualizar Precio con IVA en Woocommerce', 'BsaleCommerce')?>">
+            <input type="submit" style="display:none;" name="submit" id="UpdatePrecioIvaBsaleCommerce" class="button button-primary" value="<?php  _e('Actualizar Precio con IVA en Woocommerce', 'BsaleCommerce')?>">
 
 
 
